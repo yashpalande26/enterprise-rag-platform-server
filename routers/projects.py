@@ -6,19 +6,7 @@ from auth import get_current_user
 
 router = APIRouter(
     tags=["projects"]
-)
-
-"""
-`/api/projects`
-
-List all projects: GET `/api/projects`
-Create a new project: POST `/api/projects`
-Delete a project: DELETE `/api/projects/{project_id}`
-Get a project: GET `/api/projects/{project_id}`
-Get project chats: GET `/api/projects/{project_id}/chats`
-Get project settings: GET `/api/projects/{project_id}/settings`
-Update project settings: PUT `/api/projects/{project_id}/settings`
-"""
+)  
 
 class ProjectCreate(BaseModel):
     name: str
@@ -38,17 +26,12 @@ class ProjectSettings(BaseModel):
     vector_weight: float
     keyword_weight: float
 
-
 @router.get("/api/projects") 
 def get_projects(clerk_id: str = Depends(get_current_user)): 
-    """
-    Retrieve all projects for the authenticated user
-    """
     try:
         result = supabase.table('projects').select('*').eq('clerk_id', clerk_id).execute()
  
         return { 
-            "success": True,
             "message": "Projects retrieved successfully",
             "data": result.data
         }
@@ -59,17 +42,9 @@ def get_projects(clerk_id: str = Depends(get_current_user)):
 
 @router.post("/api/projects") 
 def create_project(project: ProjectCreate, clerk_id: str = Depends(get_current_user)):
-    """
-    Create a new project with default settings
-    
-    Logic Flow:
-    1. Insert new project into database
-    2. Create default project settings
-    3. If settings creation fails, rollback project creation
-    4. Return created project
-    """
     try:
-        # Step 1: Insert new project into database
+
+        # Insert new project into database
         project_result = supabase.table("projects").insert({
             "name": project.name, 
             "description": project.description,
@@ -77,21 +52,18 @@ def create_project(project: ProjectCreate, clerk_id: str = Depends(get_current_u
         }).execute()
 
         if not project_result.data:
-            raise HTTPException(
-                status_code=422, 
-                detail="Failed to create project - invalid data provided"
-            )
+            raise HTTPException(status_code=500, detail="Failed to create project")
 
         created_project = project_result.data[0]
         project_id = created_project["id"]
 
-        # Step 2: Create default settings for the project 
+        # Create default settings for the project 
         settings_result = supabase.table("project_settings").insert({
             "project_id": project_id, 
             "embedding_model": "text-embedding-3-large",
             "rag_strategy": "basic",
             "agent_type": "agentic",
-            "chunks_per_search": 10,
+            "chunks_per_search": 10 ,
             "final_context_size": 5,
             "similarity_threshold": 0.3,
             "number_of_queries": 5,
@@ -102,26 +74,17 @@ def create_project(project: ProjectCreate, clerk_id: str = Depends(get_current_u
         }).execute()
 
         if not settings_result.data:
-            # Step 3: Rollback - Delete the project if settings creation fails
+            # If settings creation files, we should clean up the project
             supabase.table("projects").delete().eq("id", project_id).execute()
-            raise HTTPException(
-                status_code=422, 
-                detail="Failed to create project settings - project creation rolled back"
-            )
+            raise HTTPException(status_code=500, detail="Failed to create project settings")
 
         return {
-            "success": True,
             "message": "Project created successfully", 
-            "data": created_project 
+            "data": created_project
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while creating project: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to create project: {str(e)}")
 
 
 @router.delete("/api/projects/{project_id}")
@@ -129,45 +92,26 @@ def delete_project(
     project_id: str, 
     clerk_id: str = Depends(get_current_user)
 ):
-    """
-    Delete a project and all related data
-    
-    Logic Flow:
-    1. Verify project exists and belongs to user
-    2. Delete project (CASCADE handles all related data: settings, documents, chunks, chats, messages)
-    """
     try:
-        # Step 1: Verify project exists and belongs to user 
+        # Verify project exists and belongs to user 
         project_result = supabase.table("projects").select("*").eq("id", project_id).eq("clerk_id", clerk_id).execute()
 
         if not project_result.data: 
-            raise HTTPException(
-                status_code=404, 
-                detail="Project not found or you don't have permission to delete it"
-            )
+            raise HTTPException(status_code=404, detail="Project not found or access denied")
 
-        # Step 2: Delete project (CASCADE handles all related data)
+        # Delete project (CASCADE handles all related data)
         deleted_result = supabase.table("projects").delete().eq("id", project_id).eq("clerk_id", clerk_id).execute()
 
         if not deleted_result.data: 
-            raise HTTPException(
-                status_code=404, 
-                detail="Failed to delete project - project not found"
-            )
+            raise HTTPException(status_code=500, detail="Failed to delete project")
 
         return {
-            "success": True,
             "message": "Project deleted successfully", 
-            "data": deleted_result.data[0]  
+            "data": deleted_result.data[0]
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while deleting project: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to delete project: {str(e)}")
 
 
 @router.get("/api/projects/{project_id}")
@@ -175,31 +119,19 @@ async def get_project(
     project_id: str, 
     clerk_id: str = Depends(get_current_user)
 ):
-    """
-    Retrieve a specific project by ID
-    """
     try:
         result = supabase.table("projects").select("*").eq("id", project_id).eq("clerk_id", clerk_id).execute()
 
         if not result.data:
-            raise HTTPException(
-                status_code=404, 
-                detail="Project not found or you don't have permission to access it"
-            )
+            raise HTTPException(status_code=404, detail="Project not found")
 
         return {
-            "success": True,
             "message": "Project retrieved successfully", 
             "data": result.data[0]
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while retrieving project: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to get project: {str(e)}")
 
 
 @router.get("/api/projects/{project_id}/chats")
@@ -207,23 +139,16 @@ async def get_project_chats(
     project_id: str, 
     clerk_id: str = Depends(get_current_user)
 ):
-    """
-    Retrieve all chats for a specific project
-    """
     try:
         result = supabase.table("chats").select("*").eq("project_id", project_id).eq("clerk_id", clerk_id).order("created_at", desc=True).execute()
 
         return {
-            "success": True,
-            "message": "Project chats retrieved successfully", 
+            "message": "Project retrieved successfully", 
             "data": result.data or []
         }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while retrieving project chats: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to get project: {str(e)}")
 
 
 @router.get("/api/projects/{project_id}/settings")
@@ -231,31 +156,21 @@ async def get_project_settings(
     project_id: str, 
     clerk_id: str = Depends(get_current_user)
 ):
-    """
-    Retrieve settings for a specific project
-    """
-    try:
+
+    try: 
+       
         settings_result = supabase.table("project_settings").select("*").eq("project_id", project_id).execute()
 
         if not settings_result.data:
-            raise HTTPException(
-                status_code=404, 
-                detail="Project settings not found"
-            )
+            raise HTTPException(status_code=404, detail="Project settings not found")
 
         return {
-            "success": True,
             "message": "Project settings retrieved successfully", 
             "data": settings_result.data[0]
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while retrieving project settings: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to get project settings: {str(e)}")
 
 
 @router.put("/api/projects/{project_id}/settings")
@@ -263,43 +178,24 @@ async def update_project_settings(
     project_id: str, 
     settings: ProjectSettings, 
     clerk_id: str = Depends(get_current_user)
-):
-    """
-    Update settings for a specific project
-    
-    Logic Flow:
-    1. Verify project exists and belongs to the user
-    2. Update project settings
-    """
+): 
     try: 
-        # Step 1: Verify the project exists and belongs to the user
+        # First verify the project exists and belongs to the user
         project_result = supabase.table("projects").select("id").eq("id", project_id).eq("clerk_id", clerk_id).execute()    
 
         if not project_result.data:
-            raise HTTPException(
-                status_code=404, 
-                detail="Project not found or you don't have permission to update its settings"
-            )
+            raise HTTPException(status_code=404, detail = f"Project not found or access denied")
 
-        # Step 2: Perform the update
+        # Perform the update
         result = supabase.table("project_settings").update(settings.model_dump()).eq("project_id", project_id).execute()
 
         if not result.data:
-            raise HTTPException(
-                status_code=422, 
-                detail="Failed to update project settings - invalid data provided"
-            )
+            raise HTTPException(status_code=404, detail = f"Project settings not found")
 
         return {
-            "success": True,
             "message": "Project settings updated successfully", 
             "data": result.data[0]
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"An internal server error occurred while updating project settings: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail = f"Failed to update project settings: {str(e)}")
